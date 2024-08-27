@@ -1,0 +1,23 @@
+# Node modules
+node_modules/
+
+# Environment variables file
+.env
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+
+# Compiled Java classes
+*.class
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDE-specific files
+.vscode/
+.idea/
