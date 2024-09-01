@@ -743,6 +743,7 @@ const session = require('express-session');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const UserModel = require("./signupp.js");
+const CodeModel = require("./code.js");
 const app = express();
 
 // CORS configuration
@@ -766,10 +767,42 @@ app.use(session({
 // MongoDB connection
 const mongoUri = process.env.DATABASE;
 mongoose.connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => console.log('MongoDB connected'))
-    .catch(err => console.error('MongoDB connection error:', err));
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
 
-// Nodemailer transporter setup using Gmail
+
+
+// const authenticateJWT = (req, res, next) => {
+//     const token = req.headers.authorization?.split(' ')[1];
+
+//     if (token) {
+//         jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+//             if (err) {
+//                 return res.status(401).json({ message: 'Authentication failed' });
+//             }
+//             req.user = decoded;
+//             next();
+//         });
+//     } else {
+//         res.status(401).json({ message: 'No token provided' });
+//     }
+// };
+const authenticateJWT = (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    if (token) {
+        jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+            if (err) {
+                return res.status(401).json({ message: 'Authentication failed' });
+            }
+            req.user = decoded;  // Attach the decoded token (which contains _id) to req.user
+            next();
+        });
+    } else {
+        res.status(401).json({ message: 'No token provided' });
+    }
+};
+
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -853,9 +886,9 @@ app.post('/api/verify-otp', async (req, res) => {
     user.isVerified = true;
     user.otp = null;
     user.otpExpires = null;
-
+    
     await user.save();
-
+    
     res.status(200).json({ message: 'OTP verified successfully. You are now registered!' });
 });
 
@@ -919,11 +952,11 @@ app.post('/api/login', async (req, res) => {
         if (user.password !== password) {
             return res.status(401).json({ status: "error", message: "Incorrect email or password" });
         }
-
-        const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET, {
+        const token = jwt.sign({ _id: user._id, email: user.email }, process.env.JWT_SECRET, {
             expiresIn: '1h'
         });
-
+        
+        // console.log("Generated token:", token); 
         res.json({
             status: "success",
             token: token,
@@ -934,6 +967,45 @@ app.post('/api/login', async (req, res) => {
         res.status(500).json({ status: "error", message: "An error occurred" });
     }
 });
+
+
+app.post('/api/save-code', authenticateJWT, async (req, res) => {
+    const { name, code, className } = req.body;
+    // console.log('Received data:', { name, code, className });
+
+    if (!name || !code || !className) {
+        return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    const userId = req.user._id;  // Extract userId from req.user
+
+    try {
+        const newCode = new CodeModel({ userId, name, code, className });
+        await newCode.save();
+        res.status(200).json({ message: 'Code saved successfully!' });
+    } catch (error) {
+        console.error('Error saving code:', error);
+        res.status(500).json({ message: 'Failed to save code' });
+    }
+});
+
+
+app.get('/api/get-codes', authenticateJWT, async (req, res) => {
+    const userId = req.user._id;  // Get the userId from the authenticated user
+
+    try {
+        // Find all codes that belong to the authenticated user
+        const codes = await CodeModel.find({ userId });
+        res.json(codes);
+    } catch (error) {
+        console.error('Error retrieving codes:', error);
+        res.status(500).json({ message: 'Failed to retrieve codes' });
+    }
+});
+
+
+// Middleware to authenticate JWT and attach user to req
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
