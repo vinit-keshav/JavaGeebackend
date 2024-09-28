@@ -546,9 +546,39 @@
 // const jwt = require('jsonwebtoken');
 // const UserModel = require("./signupp.js");
 // const app = express();
+// const redis = require('redis');
 
 // app.use(cors());
 // app.use(bodyParser.json());
+// // Create Redis client
+// const client = redis.createClient({
+//     host: process.env.REDIS_HOST || '127.0.0.1',
+//     port: process.env.REDIS_PORT || 6379
+// });
+
+// // Event listener for successful connection
+// client.on('connect', () => {
+//     console.log('Redis client connected successfully');
+// });
+
+// // Event listener for errors
+// client.on('error', (err) => {
+//     console.error('Redis connection error:', err);
+// });
+
+// // Event listener for reconnect attempts
+// client.on('reconnecting', () => {
+//     console.log('Attempting to reconnect to Redis...');
+// });
+
+// // Optionally, you can test the connection manually like this
+// client.ping((err, result) => {
+//     if (err) {
+//         console.error('Error pinging Redis:', err);
+//     } else {
+//         console.log('Redis ping response:', result); // Should return "PONG" if connected
+//     }
+// });
 
 // // Session middleware setup
 // app.use(session({
@@ -655,6 +685,47 @@
 // });
 
 // // Compile Java code using JDoodle API
+// // app.post('/api/compile', async (req, res) => {
+// //     const { code, className } = req.body;
+// //     const javaCode = code || `
+// //         public class ${className || 'Temp'} {
+// //             public static void main(String[] args) {
+// //                 System.out.println("Hello, World!");
+// //             }
+// //         }
+// //     `;
+
+// //     const program = {
+// //         script: javaCode,
+// //         language: "java",
+// //         versionIndex: "4",
+// //         clientId: process.env.JDOODLE_CLIENT_ID,
+// //         clientSecret: process.env.JDOODLE_CLIENT_SECRET,
+// //     };
+
+// //     try {
+// //         const response = await axios.post('https://api.jdoodle.com/v1/execute', program);
+// //         const data = response.data;
+
+// //         if (data.error) {
+// //             res.json({
+// //                 success: false,
+// //                 output: data.error,
+// //             });
+// //         } else {
+// //             res.json({
+// //                 success: true,
+// //                 output: data.output,
+// //             });
+// //         }
+// //     } catch (error) {
+// //         console.error('Error compiling code:', error);
+// //         res.status(500).json({
+// //             success: false,
+// //             message: 'Failed to compile code',
+// //         });
+// //     }
+// // });
 // app.post('/api/compile', async (req, res) => {
 //     const { code, className } = req.body;
 //     const javaCode = code || `
@@ -664,38 +735,53 @@
 //             }
 //         }
 //     `;
+    
+//     const cacheKey = `compile:${javaCode}`;
 
-//     const program = {
-//         script: javaCode,
-//         language: "java",
-//         versionIndex: "4",
-//         clientId: process.env.JDOODLE_CLIENT_ID,
-//         clientSecret: process.env.JDOODLE_CLIENT_SECRET,
-//     };
+//     // Check if the result is in Redis cache
+//     client.get(cacheKey, async (err, cachedResult) => {
+//         if (err) {
+//             console.error('Redis error:', err);
+//             return res.status(500).json({ success: false, message: 'Redis error' });
+//         }
 
-//     try {
-//         const response = await axios.post('https://api.jdoodle.com/v1/execute', program);
-//         const data = response.data;
+//         // If cached result exists, return it
+//         if (cachedResult) {
+//             return res.json({ success: true, output: cachedResult });
+//         }
 
-//         if (data.error) {
+//         // Otherwise, compile the code using JDoodle API
+//         const program = {
+//             script: javaCode,
+//             language: "java",
+//             versionIndex: "4",
+//             clientId: process.env.JDOODLE_CLIENT_ID,
+//             clientSecret: process.env.JDOODLE_CLIENT_SECRET,
+//         };
+
+//         try {
+//             const response = await axios.post('https://api.jdoodle.com/v1/execute', program);
+//             const data = response.data;
+
+//             // Cache the result in Redis with a TTL of 1 hour (3600 seconds)
+//             if (!data.error) {
+//                 client.setex(cacheKey, 3600, data.output);
+//             }
+
 //             res.json({
-//                 success: false,
-//                 output: data.error,
+//                 success: !data.error,
+//                 output: data.output || data.error,
 //             });
-//         } else {
-//             res.json({
-//                 success: true,
-//                 output: data.output,
+//         } catch (error) {
+//             console.error('Error compiling code:', error);
+//             res.status(500).json({
+//                 success: false,
+//                 message: 'Failed to compile code',
 //             });
 //         }
-//     } catch (error) {
-//         console.error('Error compiling code:', error);
-//         res.status(500).json({
-//             success: false,
-//             message: 'Failed to compile code',
-//         });
-//     }
+//     });
 // });
+
 // app.post('/api/login', async (req, res) => {
 //     const { email, password } = req.body;
 
@@ -733,6 +819,8 @@
 // app.listen(PORT, () => {
 //     console.log(`Server running on port ${PORT}`);
 // });
+
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -742,19 +830,36 @@ const axios = require('axios');
 const session = require('express-session');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
+const redis = require('redis');
 const UserModel = require("./signupp.js");
-const CodeModel = require("./code.js");
+
 const app = express();
 
-// CORS configuration
-const corsOptions = {
-    origin: process.env.CORS_ORIGIN, // Add your frontend URL here
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allow these HTTP methods
-    credentials: true, // Allow cookies and authorization headers
-};
-
-app.use(cors(corsOptions)); // Use CORS with the specified options
+app.use(cors());
 app.use(bodyParser.json());
+
+// Create Redis client
+// const client = redis.createClient({
+//     socket: {
+//         host: process.env.REDIS_HOST ,
+//         port: process.env.REDIS_PORT
+//     }
+// });
+const client = redis.createClient({
+    url: process.env.REDIS_URL
+});
+
+
+// Event listener for Redis errors
+client.on('error', (err) => {
+    console.error('Redis Client Error:', err);
+});
+
+// Connect Redis client
+(async () => {
+    await client.connect();
+    console.log('Redis client connected successfully');
+})();
 
 // Session middleware setup
 app.use(session({
@@ -767,42 +872,10 @@ app.use(session({
 // MongoDB connection
 const mongoUri = process.env.DATABASE;
 mongoose.connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
+    .then(() => console.log('MongoDB connected'))
+    .catch(err => console.error('MongoDB connection error:', err));
 
-
-
-// const authenticateJWT = (req, res, next) => {
-//     const token = req.headers.authorization?.split(' ')[1];
-
-//     if (token) {
-//         jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-//             if (err) {
-//                 return res.status(401).json({ message: 'Authentication failed' });
-//             }
-//             req.user = decoded;
-//             next();
-//         });
-//     } else {
-//         res.status(401).json({ message: 'No token provided' });
-//     }
-// };
-const authenticateJWT = (req, res, next) => {
-    const token = req.headers.authorization?.split(' ')[1];
-
-    if (token) {
-        jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-            if (err) {
-                return res.status(401).json({ message: 'Authentication failed' });
-            }
-            req.user = decoded;  // Attach the decoded token (which contains _id) to req.user
-            next();
-        });
-    } else {
-        res.status(401).json({ message: 'No token provided' });
-    }
-};
-
+// Nodemailer transporter setup using Gmail
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -858,7 +931,7 @@ app.post('/api/signup', async (req, res) => {
             return res.status(500).json({ message: 'Error sending OTP email', error });
         } else {
             console.log("OTP sent to email:", email);
-            res.status(200).json({ message: 'OTP sent. Please verify your email.' });
+            res.status(200).json({ message: 'Signup successful. Please verify your email.' });
         }
     });
 });
@@ -886,13 +959,50 @@ app.post('/api/verify-otp', async (req, res) => {
     user.isVerified = true;
     user.otp = null;
     user.otpExpires = null;
-    
+
     await user.save();
-    
+
     res.status(200).json({ message: 'OTP verified successfully. You are now registered!' });
 });
+// app.post('/api/compile', async (req, res) => {
+//     const { code, className } = req.body;
+//     const javaCode = code || `
+//         public class ${className || 'Temp'} {
+//             public static void main(String[] args) {
+//                 System.out.println("Hello, World!");
+//             }
+//         }
+//     `;
 
-// Compile Java code using JDoodle API
+//     // Measure time before calling the JDoodle API
+//     console.time('JDoodle API Execution Time');
+
+//     const program = {
+//         script: javaCode,
+//         language: "java",
+//         versionIndex: "4",
+//         clientId: process.env.JDOODLE_CLIENT_ID,
+//         clientSecret: process.env.JDOODLE_CLIENT_SECRET,
+//     };
+
+//     try {
+//         const response = await axios.post('https://api.jdoodle.com/v1/execute', program);
+//         const data = response.data;
+
+//         console.timeEnd('JDoodle API Execution Time'); // Log the time taken
+
+//         res.json({
+//             success: !data.error,
+//             output: data.output || data.error,
+//         });
+//     } catch (error) {
+//         console.error('Error compiling code:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: 'Failed to compile code',
+//         });
+//     }
+// });
 app.post('/api/compile', async (req, res) => {
     const { code, className } = req.body;
     const javaCode = code || `
@@ -902,6 +1012,22 @@ app.post('/api/compile', async (req, res) => {
             }
         }
     `;
+
+    const cacheKey = `compile:${javaCode}`;
+
+    // Measure time before Redis lookup
+    console.time('Redis Cache Lookup Time');
+
+    // Check if the result is in Redis cache
+    const cachedResult = await client.get(cacheKey);
+
+    if (cachedResult) {
+        console.timeEnd('Redis Cache Lookup Time'); // Log time taken for cache retrieval
+        return res.json({ success: true, output: cachedResult });
+    }
+
+    // If no cache, measure JDoodle API call
+    console.time('JDoodle API Execution Time');
 
     const program = {
         script: javaCode,
@@ -915,17 +1041,17 @@ app.post('/api/compile', async (req, res) => {
         const response = await axios.post('https://api.jdoodle.com/v1/execute', program);
         const data = response.data;
 
-        if (data.error) {
-            res.json({
-                success: false,
-                output: data.error,
-            });
-        } else {
-            res.json({
-                success: true,
-                output: data.output,
-            });
+        console.timeEnd('JDoodle API Execution Time'); // Log time taken for JDoodle API call
+
+        if (!data.error) {
+            // Cache the result in Redis for 1 hour
+            await client.setEx(cacheKey, 3600, data.output);
         }
+
+        res.json({
+            success: !data.error,
+            output: data.output || data.error,
+        });
     } catch (error) {
         console.error('Error compiling code:', error);
         res.status(500).json({
@@ -934,6 +1060,57 @@ app.post('/api/compile', async (req, res) => {
         });
     }
 });
+
+// Compile Java code using JDoodle API and Redis caching
+// app.post('/api/compile', async (req, res) => {
+//     const { code, className } = req.body;
+//     const javaCode = code || `
+//         public class ${className || 'Temp'} {
+//             public static void main(String[] args) {
+//                 System.out.println("Hello, World!");
+//             }
+//         }
+//     `;
+    
+//     const cacheKey = `compile:${javaCode}`;
+
+//     // Check if the result is in Redis cache
+//     const cachedResult = await client.get(cacheKey);
+    
+//     if (cachedResult) {
+//         return res.json({ success: true, output: cachedResult });
+//     }
+
+//     // Otherwise, compile the code using JDoodle API
+//     const program = {
+//         script: javaCode,
+//         language: "java",
+//         versionIndex: "4",
+//         clientId: process.env.JDOODLE_CLIENT_ID,
+//         clientSecret: process.env.JDOODLE_CLIENT_SECRET,
+//     };
+
+//     try {
+//         const response = await axios.post('https://api.jdoodle.com/v1/execute', program);
+//         const data = response.data;
+
+//         if (!data.error) {
+//             // Cache the result in Redis with a TTL of 1 hour (3600 seconds)
+//             await client.setEx(cacheKey, 3600, data.output);
+//         }
+
+//         res.json({
+//             success: !data.error,
+//             output: data.output || data.error,
+//         });
+//     } catch (error) {
+//         console.error('Error compiling code:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: 'Failed to compile code',
+//         });
+//     }
+// });
 
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
@@ -946,17 +1123,17 @@ app.post('/api/login', async (req, res) => {
         }
 
         if (!user.isVerified) {
-            return res.status(401).json({ status: "error", message: "Your email is not verified. Please verify your account." });
+            return res.status(401).json({ status: "error", message: "Please verify your email before logging in." });
         }
 
         if (user.password !== password) {
             return res.status(401).json({ status: "error", message: "Incorrect email or password" });
         }
-        const token = jwt.sign({ _id: user._id, email: user.email }, process.env.JWT_SECRET, {
+
+        const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET, {
             expiresIn: '1h'
         });
-        
-        // console.log("Generated token:", token); 
+
         res.json({
             status: "success",
             token: token,
@@ -968,45 +1145,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-
-app.post('/api/save-code', authenticateJWT, async (req, res) => {
-    const { name, code, className } = req.body;
-    // console.log('Received data:', { name, code, className });
-
-    if (!name || !code || !className) {
-        return res.status(400).json({ message: 'All fields are required' });
-    }
-
-    const userId = req.user._id;  // Extract userId from req.user
-
-    try {
-        const newCode = new CodeModel({ userId, name, code, className });
-        await newCode.save();
-        res.status(200).json({ message: 'Code saved successfully!' });
-    } catch (error) {
-        console.error('Error saving code:', error);
-        res.status(500).json({ message: 'Failed to save code' });
-    }
-});
-
-
-app.get('/api/get-codes', authenticateJWT, async (req, res) => {
-    const userId = req.user._id;  // Get the userId from the authenticated user
-
-    try {
-        // Find all codes that belong to the authenticated user
-        const codes = await CodeModel.find({ userId });
-        res.json(codes);
-    } catch (error) {
-        console.error('Error retrieving codes:', error);
-        res.status(500).json({ message: 'Failed to retrieve codes' });
-    }
-});
-
-
-// Middleware to authenticate JWT and attach user to req
-
-
+// Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
